@@ -1,1 +1,97 @@
+// SPDX-License-Identifier: MIT
+pragma solidity ^0.8.0;
 
+import "@openzeppelin/contracts/token/ERC20/ERC20.sol";
+import "@openzeppelin/contracts/access/Ownable.sol";
+
+contract KnowledgeVaultToken is ERC20, Ownable {
+    constructor() ERC20("Knowledge Vault Token", "KVT") {
+        _mint(msg.sender, 1000000 * 10 ** decimals()); // 1 milyon token
+    }
+}
+
+contract KnowledgeVault is Ownable {
+    KnowledgeVaultToken public kvToken;
+    
+    struct Content {
+        string contentHash;     // IPFS hash of the content
+        string contentType;     // "video", "podcast", "ebook"
+        address creator;
+        uint256 votes;
+        uint256 timestamp;
+        bool exists;
+    }
+    
+    // Content ID => Content
+    mapping(uint256 => Content) public contents;
+    // Content ID => (User Address => Has Voted)
+    mapping(uint256 => mapping(address => bool)) public hasVoted;
+    
+    uint256 public nextContentId;
+    uint256 public constant REWARD_PER_CONTENT = 100 * 10**18; // 100 token
+    uint256 public constant REWARD_PER_VOTE = 1 * 10**18;    // 1 token
+    
+    event ContentUploaded(uint256 contentId, address creator, string contentType);
+    event ContentVoted(uint256 contentId, address voter);
+    
+    constructor(address _tokenAddress) {
+        kvToken = KnowledgeVaultToken(_tokenAddress);
+    }
+    
+    function uploadContent(string memory _contentHash, string memory _contentType) external {
+        require(bytes(_contentHash).length > 0, "Content hash cannot be empty");
+        require(
+            keccak256(bytes(_contentType)) == keccak256(bytes("video")) ||
+            keccak256(bytes(_contentType)) == keccak256(bytes("podcast")) ||
+            keccak256(bytes(_contentType)) == keccak256(bytes("ebook")),
+            "Invalid content type"
+        );
+        
+        contents[nextContentId] = Content({
+            contentHash: _contentHash,
+            contentType: _contentType,
+            creator: msg.sender,
+            votes: 0,
+            timestamp: block.timestamp,
+            exists: true
+        });
+        
+        // Ödül ver
+        kvToken.transfer(msg.sender, REWARD_PER_CONTENT);
+        
+        emit ContentUploaded(nextContentId, msg.sender, _contentType);
+        nextContentId++;
+    }
+    
+    function voteContent(uint256 _contentId) external {
+        require(contents[_contentId].exists, "Content does not exist");
+        require(!hasVoted[_contentId][msg.sender], "Already voted");
+        
+        contents[_contentId].votes++;
+        hasVoted[_contentId][msg.sender] = true;
+        
+        // Hem oylayan hem içerik sahibi ödül alır
+        kvToken.transfer(msg.sender, REWARD_PER_VOTE);
+        kvToken.transfer(contents[_contentId].creator, REWARD_PER_VOTE);
+        
+        emit ContentVoted(_contentId, msg.sender);
+    }
+    
+    function getContent(uint256 _contentId) external view returns (
+        string memory contentHash,
+        string memory contentType,
+        address creator,
+        uint256 votes,
+        uint256 timestamp
+    ) {
+        require(contents[_contentId].exists, "Content does not exist");
+        Content memory content = contents[_contentId];
+        return (
+            content.contentHash,
+            content.contentType,
+            content.creator,
+            content.votes,
+            content.timestamp
+        );
+    }
+}
